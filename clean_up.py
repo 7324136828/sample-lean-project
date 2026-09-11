@@ -31,14 +31,14 @@ LATEX_EXTENSIONS = {
 
 # Directories that should NEVER be deleted or searched for deletion
 PROTECTED_DIRS = {
-    ".git", ".github", "skill", "skills"
+    ".git", ".github", ".agents", "skill", "skills"
 }
 
 # File names that are source code and must NEVER be deleted
 PROTECTED_FILES = {
     "lakefile.toml", "lakefile.lean", "lake-manifest.json",
     "lean-toolchain", "formalization.yaml", "README.md",
-    "CONTRIBUTING.md", "LICENSE", ".gitignore"
+    "CONTRIBUTING.md", "LICENSE", ".gitignore", "version"
 }
 
 

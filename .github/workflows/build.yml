@@ -6,10 +6,19 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      version_override:
+        description: 'Optional build version override (e.g. v1.0.0)'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   build-and-test:
@@ -17,6 +26,37 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Determine Build Version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version_override }}" ]; then
+            BUILD_VER="${{ github.event.inputs.version_override }}"
+          elif [ -f version ]; then
+            BUILD_VER=$(head -n 1 version | tr -d ' \r\n')
+          else
+            BUILD_VER="v1.0.0"
+          fi
+
+          if [[ ! "$BUILD_VER" =~ ^v ]]; then
+            BUILD_VER="v$BUILD_VER"
+          fi
+
+          BUILD_DATE=$(date -u +'%Y-%m-%d')
+          SHORT_SHA="${GITHUB_SHA::7}"
+          FULL_VER="${BUILD_VER}+build.${{ github.run_number }}.${SHORT_SHA}"
+
+          echo "BUILD_VERSION=${BUILD_VER}" >> $GITHUB_ENV
+          echo "FULL_VERSION=${FULL_VER}" >> $GITHUB_ENV
+          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+          echo "version=${BUILD_VER}" >> $GITHUB_OUTPUT
+          echo "full_version=${FULL_VER}" >> $GITHUB_OUTPUT
+
+          echo "### Build Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${BUILD_VER}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Full Version**: \`${FULL_VER}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: \`${GITHUB_SHA}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Run Number**: \`${{ github.run_number }}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Setup Lean
         uses: leanprover/lean-action@v1
@@ -52,11 +92,45 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The test suite compiles a PDF whenever an engine is available, so the
+      # engine must be installed before the tests run.
+      - name: Install LaTeX dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-xetex \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            lmodern
+
       - name: Run Test Suite
         run: python -m unittest discover -s tests -p "test_*.py"
 
-      - name: Convert Lean to LaTeX
-        run: python lean_tools.py to-latex Example/Basic.lean
+      - name: Convert Lean to LaTeX and compile PDF
+        run: python lean_tools.py to-latex Example/Basic.lean --pdf
+
+      - name: Verify PDF generated
+        run: |
+          if [ ! -s output/Basic.pdf ]; then
+            echo "Error: output/Basic.pdf was not generated or is empty!"
+            exit 1
+          fi
+          echo "Successfully verified output/Basic.pdf"
+
+      - name: Generate Build Version Metadata
+        run: |
+          mkdir -p output
+          cat <<EOF > output/build_info.json
+          {
+            "name": "example",
+            "version": "${{ env.BUILD_VERSION }}",
+            "full_version": "${{ env.FULL_VERSION }}",
+            "commit": "${{ github.sha }}",
+            "run_number": "${{ github.run_number }}",
+            "build_date": "${{ env.BUILD_DATE }}"
+          }
+          EOF
+          echo "${{ env.BUILD_VERSION }}" > output/version.txt
 
       - name: Save Lake cache
         if: success()
@@ -68,5 +142,42 @@ jobs:
       - name: Upload LaTeX and PDF artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: latex-documents
+          name: latex-pdf-documents-${{ env.BUILD_VERSION }}
           path: output/
+
+      - name: Tag merged main version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          TAG_REF="refs/tags/${BUILD_VERSION}"
+          TAG_TARGET=$(git ls-remote origin "${TAG_REF}^{}" | awk '{print $1}')
+          if [ -z "$TAG_TARGET" ]; then
+            TAG_TARGET=$(git ls-remote --refs origin "$TAG_REF" | awk '{print $1}')
+          fi
+
+          if [ -n "$TAG_TARGET" ]; then
+            if [ "$TAG_TARGET" != "$GITHUB_SHA" ]; then
+              echo "Error: ${BUILD_VERSION} already points to ${TAG_TARGET}, not ${GITHUB_SHA}."
+              exit 1
+            fi
+            echo "Tag ${BUILD_VERSION} already points to this merge commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$BUILD_VERSION" -m "Release $BUILD_VERSION" "$GITHUB_SHA"
+          git push origin "$TAG_REF"
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUILD_VERSION }}
+          name: Release ${{ env.BUILD_VERSION }}
+          files: |
+            output/Basic.pdf
+            output/Basic.tex
+            output/build_info.json
+            output/version.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

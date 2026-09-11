@@ -37,8 +37,8 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output"
 # Lean Compilation
 # ---------------------------------------------------------------------------
 
-def find_executable(name: str) -> str:
-    """Find executable in PATH or standard elan locations."""
+def find_executable(name: str) -> str | None:
+    """Return an executable path from PATH or standard elan locations, if present."""
     path = shutil.which(name)
     if path:
         return path
@@ -49,7 +49,7 @@ def find_executable(name: str) -> str:
     if elan_bin.exists():
         return str(elan_bin)
 
-    return name
+    return None
 
 
 def compile_lean(
@@ -73,6 +73,16 @@ def compile_lean(
 
     lake_bin = find_executable("lake")
     lean_bin = find_executable("lean")
+
+    if clean and not lake_bin:
+        print("[LeanTools] Error: Lake executable was not found in PATH.", file=sys.stderr)
+        return False
+    if file_path and not lean_bin:
+        print("[LeanTools] Error: Lean executable was not found in PATH.", file=sys.stderr)
+        return False
+    if not file_path and not lake_bin:
+        print("[LeanTools] Error: Lake executable was not found in PATH.", file=sys.stderr)
+        return False
 
     if clean:
         if verbose:
@@ -478,6 +488,21 @@ def convert_file_to_latex(
     return out_path
 
 
+def get_project_version() -> str:
+    """Retrieve current project version from version file or lakefile.toml."""
+    version_file = PROJECT_ROOT / "version"
+    if version_file.exists():
+        v = version_file.read_text(encoding="utf-8").strip()
+        if v:
+            return v
+    lakefile = PROJECT_ROOT / "lakefile.toml"
+    if lakefile.exists():
+        match = re.search(r'version\s*=\s*"([^"]+)"', lakefile.read_text(encoding="utf-8"))
+        if match:
+            return f"v{match.group(1)}"
+    return "v1.0.0"
+
+
 def compile_latex_to_pdf(
     tex_path: Path,
     engine: str = "xelatex",
@@ -488,13 +513,30 @@ def compile_latex_to_pdf(
     if not compiler or not shutil.which(compiler):
         fallback = "pdflatex" if engine == "xelatex" else "xelatex"
         compiler = find_executable(fallback)
+        if not compiler or not shutil.which(compiler):
+            print(
+                f"[LeanTools] [ERROR] Neither '{engine}' nor '{fallback}' was found in PATH.\n"
+                f"            Please install TeX Live, MiKTeX, or MacTeX to compile PDFs.",
+                file=sys.stderr
+            )
+            return tex_path
 
     print(f"[LeanTools] Compiling LaTeX to PDF in {tex_path.parent.name}/ with {Path(compiler).name}...")
-    cmd = [compiler, "-interaction=nonstopmode", tex_path.name]
-    res = subprocess.run(cmd, cwd=tex_path.parent, capture_output=True, text=True)
-
     pdf_file = tex_path.with_suffix(".pdf")
+    # Do not mistake a PDF from an earlier run for a successful compilation.
     if pdf_file.exists():
+        pdf_file.unlink()
+
+    cmd = [compiler, "-interaction=nonstopmode", tex_path.name]
+    try:
+        res = subprocess.run(cmd, cwd=tex_path.parent, capture_output=True, text=True)
+    except OSError as e:
+        print(f"[LeanTools] [ERROR] Could not run compiler '{compiler}': {e}", file=sys.stderr)
+        return tex_path
+
+    # Some TeX distributions return a nonzero status for warnings while still
+    # producing a usable PDF. A fresh, non-empty PDF is the deliverable check.
+    if pdf_file.exists() and pdf_file.stat().st_size > 0:
         print(f"[LeanTools] [SUCCESS] Generated PDF: {pdf_file}")
 
         # Clean up compiler auxiliary files to keep output/ pristine
@@ -523,6 +565,12 @@ def compile_latex_to_pdf(
 def main():
     parser = argparse.ArgumentParser(
         description="Lean Tools: Build Lean 4 projects and convert Lean scripts to LaTeX."
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {get_project_version()}",
+        help="Show project version and exit",
     )
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
@@ -567,8 +615,9 @@ def main():
     elif args.command == "to-latex":
         in_path = Path(args.input)
         out_dir = Path(args.output_dir)
+        pdf_ok = True
         if in_path.is_file():
-            convert_file_to_latex(
+            out_result = convert_file_to_latex(
                 in_path,
                 output_file=args.output,
                 output_dir=out_dir,
@@ -577,11 +626,13 @@ def main():
                 engine=args.engine,
                 clean_aux=not args.keep_aux
             )
+            if args.pdf and out_result.suffix != ".pdf":
+                pdf_ok = False
         elif in_path.is_dir():
             lean_files = [f for f in in_path.rglob("*.lean") if ".lake" not in f.parts and "skill" not in f.parts]
             print(f"[LeanTools] Found {len(lean_files)} Lean files in {in_path}:")
             for lf in lean_files:
-                convert_file_to_latex(
+                out_result = convert_file_to_latex(
                     lf,
                     output_dir=out_dir,
                     standalone=not args.snippet,
@@ -589,8 +640,14 @@ def main():
                     engine=args.engine,
                     clean_aux=not args.keep_aux
                 )
+                if args.pdf and out_result.suffix != ".pdf":
+                    pdf_ok = False
         else:
             print(f"[LeanTools] Error: Path not found: {in_path}", file=sys.stderr)
+            sys.exit(1)
+
+        if args.pdf and not pdf_ok:
+            print("[LeanTools] Error: PDF compilation failed.", file=sys.stderr)
             sys.exit(1)
 
     elif args.command == "all":
@@ -606,8 +663,16 @@ def main():
             f for f in PROJECT_ROOT.rglob("*.lean")
             if ".lake" not in f.parts and "skill" not in f.parts
         ]
+        all_pdf_ok = True
         for lf in lean_files:
-            convert_file_to_latex(lf, output_dir=out_dir, compile_pdf=args.pdf)
+            out_result = convert_file_to_latex(lf, output_dir=out_dir, compile_pdf=args.pdf)
+            if args.pdf and out_result.suffix != ".pdf":
+                all_pdf_ok = False
+
+        if args.pdf and not all_pdf_ok:
+            print("[LeanTools] Error: One or more PDF compilations failed.", file=sys.stderr)
+            sys.exit(1)
+
         print(f"\n[LeanTools] All done! Outputs generated in {out_dir}")
 
     else:
