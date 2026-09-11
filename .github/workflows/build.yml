@@ -1,0 +1,72 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Lean
+        uses: leanprover/lean-action@v1
+        with:
+          build: false
+          test: false
+          use-mathlib-cache: true
+          use-github-cache: false
+
+      - name: Restore Lake cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.sha }}
+          restore-keys: lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lake-manifest.json') }}
+
+      - name: Clean corrupt cached packages
+        run: |
+          if [ -d .lake/packages ]; then
+            find .lake/packages -mindepth 1 -maxdepth 1 -type d | while read -r package; do
+              if ! git -C "$package" rev-parse HEAD >/dev/null 2>&1; then
+                echo "Removing corrupt cached package: $package"
+                rm -rf "$package"
+              fi
+            done
+          fi
+
+      - name: Build Lean project
+        run: lake build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Test Suite
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Convert Lean to LaTeX
+        run: python lean_tools.py to-latex Example/Basic.lean
+
+      - name: Save Lake cache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: .lake
+          key: lake-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('lean-toolchain') }}-${{ hashFiles('lake-manifest.json') }}-${{ github.sha }}
+
+      - name: Upload LaTeX and PDF artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: latex-documents
+          path: output/
