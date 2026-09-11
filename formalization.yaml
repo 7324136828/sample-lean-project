@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mathlib-initiative/formalization.yaml/main/schema/formalization.schema.json
+
+version: "v0.4"
+
+project:
+  name: "Example"
+  description: "A minimalistic sample Lean 4 project based on skill/example2 and skills/lean_example."
+  license: "Apache-2.0"
+
+classification:
+  msc2020:
+    - "03B35"
+
+status:
+  scope: "Minimal formalization sample"
+  main_results:
+    - declaration: "Example.nat_add_comm"
+      file: "Example/Basic.lean"
+      sorry_count: 0
+    - declaration: "Example.nat_add_assoc"
+      file: "Example/Basic.lean"
+      sorry_count: 0
+    - declaration: "Example.double_eq_add"
+      file: "Example/Basic.lean"
+      sorry_count: 0
+    - declaration: "Example.le_add_right"
+      file: "Example/Basic.lean"
+      sorry_count: 0
+    - declaration: "Example.Test.test_nat_add_comm_zero"
+      file: "Example/Test.lean"
+      sorry_count: 0
+    - declaration: "Example.Test.test_nat_add_assoc_concrete"
+      file: "Example/Test.lean"
+      sorry_count: 0
+    - declaration: "Example.Test.test_double_eq_add_val"
+      file: "Example/Test.lean"
+      sorry_count: 0
+    - declaration: "Example.Test.test_double_large"
+      file: "Example/Test.lean"
+      sorry_count: 0
+    - declaration: "Example.Test.test_le_add_zero"
+      file: "Example/Test.lean"
+      sorry_count: 0
+    - declaration: "Example.Test.test_hello_value"
+      file: "Example/Test.lean"
+      sorry_count: 0
