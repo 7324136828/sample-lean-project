@@ -23,7 +23,7 @@ jobs:
         with:
           build: false
           test: false
-          use-mathlib-cache: true
+          use-mathlib-cache: false
           use-github-cache: false
 
       - name: Restore Lake cache
