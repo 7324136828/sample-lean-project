@@ -37,8 +37,8 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output"
 # Lean Compilation
 # ---------------------------------------------------------------------------
 
-def find_executable(name: str) -> str:
-    """Find executable in PATH or standard elan locations."""
+def find_executable(name: str) -> str | None:
+    """Return an executable path from PATH or standard elan locations, if present."""
     path = shutil.which(name)
     if path:
         return path
@@ -49,7 +49,7 @@ def find_executable(name: str) -> str:
     if elan_bin.exists():
         return str(elan_bin)
 
-    return name
+    return None
 
 
 def compile_lean(
@@ -73,6 +73,16 @@ def compile_lean(
 
     lake_bin = find_executable("lake")
     lean_bin = find_executable("lean")
+
+    if clean and not lake_bin:
+        print("[LeanTools] Error: Lake executable was not found in PATH.", file=sys.stderr)
+        return False
+    if file_path and not lean_bin:
+        print("[LeanTools] Error: Lean executable was not found in PATH.", file=sys.stderr)
+        return False
+    if not file_path and not lake_bin:
+        print("[LeanTools] Error: Lake executable was not found in PATH.", file=sys.stderr)
+        return False
 
     if clean:
         if verbose:
@@ -512,6 +522,11 @@ def compile_latex_to_pdf(
             return tex_path
 
     print(f"[LeanTools] Compiling LaTeX to PDF in {tex_path.parent.name}/ with {Path(compiler).name}...")
+    pdf_file = tex_path.with_suffix(".pdf")
+    # Do not mistake a PDF from an earlier run for a successful compilation.
+    if pdf_file.exists():
+        pdf_file.unlink()
+
     cmd = [compiler, "-interaction=nonstopmode", tex_path.name]
     try:
         res = subprocess.run(cmd, cwd=tex_path.parent, capture_output=True, text=True)
@@ -519,8 +534,9 @@ def compile_latex_to_pdf(
         print(f"[LeanTools] [ERROR] Could not run compiler '{compiler}': {e}", file=sys.stderr)
         return tex_path
 
-    pdf_file = tex_path.with_suffix(".pdf")
-    if pdf_file.exists():
+    # Some TeX distributions return a nonzero status for warnings while still
+    # producing a usable PDF. A fresh, non-empty PDF is the deliverable check.
+    if pdf_file.exists() and pdf_file.stat().st_size > 0:
         print(f"[LeanTools] [SUCCESS] Generated PDF: {pdf_file}")
 
         # Clean up compiler auxiliary files to keep output/ pristine

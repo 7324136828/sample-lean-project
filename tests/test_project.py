@@ -148,6 +148,7 @@ class TestCleanUpScript(unittest.TestCase):
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / "lakefile.toml"))
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / "lean_tools.py"))
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / ".github" / "workflows" / "build.yml"))
+        self.assertTrue(clean_up.is_protected(PROJECT_ROOT / ".agents"))
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / "version"))
         self.assertFalse(clean_up.is_protected(PROJECT_ROOT / "output" / "Basic.tex"))
         self.assertFalse(clean_up.is_protected(PROJECT_ROOT / "output"))

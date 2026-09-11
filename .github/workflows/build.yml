@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -18,6 +16,9 @@ on:
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   build-and-test:
@@ -33,8 +34,6 @@ jobs:
             BUILD_VER="${{ github.event.inputs.version_override }}"
           elif [ -f version ]; then
             BUILD_VER=$(head -n 1 version | tr -d ' \r\n')
-          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            BUILD_VER="${GITHUB_REF#refs/tags/}"
           else
             BUILD_VER="v1.0.0"
           fi
@@ -93,9 +92,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run Test Suite
-        run: python -m unittest discover -s tests -p "test_*.py"
-
+      # The test suite compiles a PDF whenever an engine is available, so the
+      # engine must be installed before the tests run.
       - name: Install LaTeX dependencies
         run: |
           sudo apt-get update
@@ -104,6 +102,9 @@ jobs:
             texlive-latex-extra \
             texlive-fonts-recommended \
             lmodern
+
+      - name: Run Test Suite
+        run: python -m unittest discover -s tests -p "test_*.py"
 
       - name: Convert Lean to LaTeX and compile PDF
         run: python lean_tools.py to-latex Example/Basic.lean --pdf
@@ -144,8 +145,31 @@ jobs:
           name: latex-pdf-documents-${{ env.BUILD_VERSION }}
           path: output/
 
+      - name: Tag merged main version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          TAG_REF="refs/tags/${BUILD_VERSION}"
+          TAG_TARGET=$(git ls-remote origin "${TAG_REF}^{}" | awk '{print $1}')
+          if [ -z "$TAG_TARGET" ]; then
+            TAG_TARGET=$(git ls-remote --refs origin "$TAG_REF" | awk '{print $1}')
+          fi
+
+          if [ -n "$TAG_TARGET" ]; then
+            if [ "$TAG_TARGET" != "$GITHUB_SHA" ]; then
+              echo "Error: ${BUILD_VERSION} already points to ${TAG_TARGET}, not ${GITHUB_SHA}."
+              exit 1
+            fi
+            echo "Tag ${BUILD_VERSION} already points to this merge commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$BUILD_VERSION" -m "Release $BUILD_VERSION" "$GITHUB_SHA"
+          git push origin "$TAG_REF"
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.BUILD_VERSION }}
