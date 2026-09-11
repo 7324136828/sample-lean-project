@@ -14,6 +14,7 @@ A minimalistic Lean 4 project set up based on the conventions and toolchains in 
 - `serve.py`: HTTP development server based on `skill/example2/serve.py` with dashboard, PDF/LaTeX serving, and route translation.
 - `lean_tools.py`: Python CLI tool to compile Lean and convert Lean scripts to LaTeX / PDF exclusively in the `output/` folder.
 - `clean_up.py`: Python cleanup script to purge generated files (`output/`, `.lake`, `.tex`, `.pdf`, pycache).
+- `version`: Project semantic version identifier (e.g. `v1.0.0`).
 - `formalization.yaml`: Formalization metadata tracking the theorems and verification status.
 
 ## Building & Testing
@@ -88,12 +89,16 @@ python clean_up.py --lake
 ## GitHub Actions Workflow
 
 The CI workflow in `.github/workflows/build.yml`:
-1. Sets up Lean 4 via `leanprover/lean-action@v1`.
-2. Restores and caches `.lake` build artifacts using `actions/cache`.
-3. Cleans any corrupt cached packages.
-4. Builds the Lean project (`lake build`).
-5. Runs the test suite (`python -m unittest discover -s tests`).
-6. Generates LaTeX documents into `output/` and uploads artifacts.
+1. **Determines build version**: Reads the `version` file (with fallbacks to tag `refs/tags/v*` or manual dispatch `version_override`), sets environment outputs, and writes job summaries.
+2. **Sets up Lean 4**: Configured via `leanprover/lean-action@v1`.
+3. **Restores and caches Lake artifacts**: Caches `.lake` packages and dependencies with corruption recovery.
+4. **Builds project**: Verifies Lean source files compile with `lake build`.
+5. **Runs test suite**: Executes Python unit and verification tests (`python -m unittest discover -s tests`).
+6. **Installs TeX Live environment**: Installs XeLaTeX, packages, and Latin Modern fonts on the runner.
+7. **Compiles LaTeX & PDF**: Converts Lean code to formatted LaTeX and compiles `.pdf` files with `--pdf` verification.
+8. **Generates version provenance**: Writes `output/build_info.json` and `output/version.txt`.
+9. **Uploads versioned artifacts**: Publishes `latex-pdf-documents-${BUILD_VERSION}`.
+10. **Automates GitHub Releases**: Creates GitHub releases on version tags (`v*`).
 
 ## Adding Mathlib
 

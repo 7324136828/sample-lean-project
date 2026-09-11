@@ -38,7 +38,7 @@ PROTECTED_DIRS = {
 PROTECTED_FILES = {
     "lakefile.toml", "lakefile.lean", "lake-manifest.json",
     "lean-toolchain", "formalization.yaml", "README.md",
-    "CONTRIBUTING.md", "LICENSE", ".gitignore"
+    "CONTRIBUTING.md", "LICENSE", ".gitignore", "version"
 }
 
 

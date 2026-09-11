@@ -31,11 +31,19 @@ class TestProjectConfiguration(unittest.TestCase):
         content = toolchain_file.read_text(encoding="utf-8").strip()
         self.assertIn("leanprover/lean4:", content)
 
+    def test_version_file(self):
+        version_file = PROJECT_ROOT / "version"
+        self.assertTrue(version_file.exists(), "version file must exist")
+        content = version_file.read_text(encoding="utf-8").strip()
+        self.assertTrue(content.startswith("v"), "version should start with 'v'")
+        self.assertEqual(lean_tools.get_project_version(), content)
+
     def test_lakefile_toml(self):
         lakefile = PROJECT_ROOT / "lakefile.toml"
         self.assertTrue(lakefile.exists(), "lakefile.toml must exist")
         content = lakefile.read_text(encoding="utf-8")
         self.assertIn('name = "example"', content)
+        self.assertIn('version = "1.0.0"', content)
         self.assertIn('defaultTargets = ["Example"]', content)
         self.assertIn('autoImplicit = false', content)
 
@@ -46,6 +54,8 @@ class TestProjectConfiguration(unittest.TestCase):
         self.assertIn("leanprover/lean-action", content)
         self.assertIn("lake build", content)
         self.assertIn("output/", content)
+        self.assertIn("Determine Build Version", content)
+        self.assertIn("--pdf", content)
 
 
 class TestLeanCompilation(unittest.TestCase):
@@ -113,6 +123,23 @@ end Sample
         self.assertIn("nat_add_comm", content)
 
 
+    def test_compile_pdf_if_engine_available(self):
+        compiler = lean_tools.find_executable("xelatex")
+        if not compiler:
+            compiler = lean_tools.find_executable("pdflatex")
+        if not compiler:
+            self.skipTest("No LaTeX engine found locally")
+        out_path = lean_tools.convert_file_to_latex(
+            PROJECT_ROOT / "Example" / "Basic.lean",
+            standalone=True,
+            compile_pdf=True
+        )
+        self.assertTrue(out_path.exists())
+        self.assertEqual(out_path.suffix, ".pdf")
+        # Clean up generated PDF after test
+        clean_up.clean_project(clean_latex=True, clean_lake=False, clean_pycache=False, quiet=True)
+
+
 class TestCleanUpScript(unittest.TestCase):
     """Test clean_up.py functionality and safety guards."""
 
@@ -121,6 +148,7 @@ class TestCleanUpScript(unittest.TestCase):
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / "lakefile.toml"))
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / "lean_tools.py"))
         self.assertTrue(clean_up.is_protected(PROJECT_ROOT / ".github" / "workflows" / "build.yml"))
+        self.assertTrue(clean_up.is_protected(PROJECT_ROOT / "version"))
         self.assertFalse(clean_up.is_protected(PROJECT_ROOT / "output" / "Basic.tex"))
         self.assertFalse(clean_up.is_protected(PROJECT_ROOT / "output"))
 
